@@ -2,6 +2,13 @@
 *Forge job #1 under Fab. Skeleton + VPN proof. Drafted 27 Jun 2026.*
 *Carry by hand first — feel the pain, automate later.*
 
+**STATUS: ✅ PHASE 1 GREEN — 28 Jun 2026.** Builds from clean source (NDK+CMake
+native baseline passed first try), installs as `uk.fab.antitracker` alongside stock
+NetGuard, VPN slot acquired + filtering proven both ways on the AVD, NOTICE added.
+Commits `88578c5a` + `5b45d190`; push + tag `p1-baseline` pending (Paul's hands).
+Phase 2 (blocklists) opens — but see FORGE_NOTES P1: race to the ⭐ features, don't
+over-build the firewall.
+
 ---
 
 ## Goal (Phase 1 definition of done — the gate)
