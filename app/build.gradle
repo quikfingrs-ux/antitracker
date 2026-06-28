@@ -8,7 +8,7 @@ android {
     compileSdkVersion = 35
 
     defaultConfig {
-        applicationId = "eu.faircode.netguard"
+        applicationId = "uk.fab.antitracker"
         versionName = "2.335"
         minSdkVersion 22
         targetSdkVersion 35
