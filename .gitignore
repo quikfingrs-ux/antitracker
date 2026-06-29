@@ -15,3 +15,6 @@ keystore.properties
 *.keystore
 crowdin.properties
 app/.cxx/
+
+# Cefn operating charter — laptop-local (machine paths); never push to public repo
+/CLAUDE.md
