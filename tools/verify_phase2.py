@@ -70,7 +70,16 @@ HOSTS_URL_PLACEHOLDER = "https://www.netguard.me/hosts"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PREFS_FILE = f"/data/data/{PACKAGE}/shared_prefs/{PACKAGE}_preferences.xml"
 HOSTS_DEVICE = f"/data/data/{PACKAGE}/files/hosts.txt"
-DEBUG_APK = os.path.join(REPO, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+DEBUG_DIR = os.path.join(REPO, "app", "build", "outputs", "apk", "debug")
+
+
+def find_debug_apk():
+    """Gradle renames the debug output (e.g. NetGuard-v2.335-debug.apk), so glob
+    for the newest *-debug.apk rather than assuming app-debug.apk."""
+    import glob
+    apks = glob.glob(os.path.join(DEBUG_DIR, "*-debug.apk"))
+    apks.sort(key=os.path.getmtime, reverse=True)
+    return apks[0] if apks else os.path.join(DEBUG_DIR, "app-debug.apk")
 
 # Laptop build gotchas (see charter): JAVA_HOME -> Android Studio jbr if not already set.
 JBR = r"C:\Program Files\Android\Android Studio\jbr"
@@ -133,22 +142,52 @@ def device_present():
 
 
 # ---------------------------------------------------------------------------
-# prefs (SharedPreferences XML edited via run-as)
+# device data access — via ROOT (this AVD is userdebug; run-as is SELinux-blocked
+# for writes, so we write as root then chown + restorecon so the file lands
+# app-owned with the right label, exactly as if the app had created it)
 # ---------------------------------------------------------------------------
+_app_uid = [None]
+
+
+def enable_root():
+    out = adb_out("root").strip()
+    time.sleep(2)
+    adb("wait-for-device")
+    return "cannot run as root" not in out.lower()
+
+
+def app_uid():
+    if _app_uid[0] is None:
+        _app_uid[0] = adb_out("shell", "stat", "-c", "%u",
+                              f"/data/data/{PACKAGE}").strip() or "0"
+    return _app_uid[0]
+
+
+def dev_read(path):
+    return adb_out("shell", "cat", path)   # root can read
+
+
+def dev_write(path, content):
+    """Write a file as root, then hand it to the app uid with the correct
+    SELinux label so the app can read/write it as its own."""
+    r = adb("shell", "sh", "-c", f"cat > {path}", input=content.encode("utf-8"))
+    if r.returncode != 0:
+        log("  ! write failed: " + r.stderr.decode("utf-8", "replace").strip())
+        return False
+    uid = app_uid()
+    adb("shell", "chown", f"{uid}:{uid}", path)
+    adb("shell", "chmod", "660", path)
+    adb("shell", "restorecon", path)
+    return True
+
+
 def read_prefs():
-    r = adb("shell", "run-as", PACKAGE, "cat", PREFS_FILE)
-    out = r.stdout.decode("utf-8", "replace")
+    out = dev_read(PREFS_FILE)
     return out if "<map>" in out else PREFS_TEMPLATE
 
 
 def write_prefs(xml):
-    # pipe the file content to a remote `cat >` running as the app uid
-    r = adb("shell", "run-as", PACKAGE, "sh", "-c", f"cat > {PREFS_FILE}",
-            input=xml.encode("utf-8"))
-    if r.returncode != 0:
-        log("  ! prefs write failed: " + r.stderr.decode("utf-8", "replace").strip())
-        return False
-    return True
+    return dev_write(PREFS_FILE, xml)
 
 
 def set_bool(xml, key, val):
@@ -186,9 +225,7 @@ def push_controlled_hosts():
     log("  pushing controlled hosts.txt (MUST_BLOCK domains)...")
     content = "# Anti-Tracker Phase 2 controlled test list\n" + \
               "\n".join(f"0.0.0.0 {d}" for d in MUST_BLOCK) + "\n"
-    r = adb("shell", "run-as", PACKAGE, "sh", "-c", f"cat > {HOSTS_DEVICE}",
-            input=content.encode("utf-8"))
-    return r.returncode == 0
+    return dev_write(HOSTS_DEVICE, content)
 
 
 def trigger_download(timeout=90):
@@ -222,7 +259,15 @@ def start_tunnel(settle=18):
     time.sleep(settle)
     services = shell(f"dumpsys activity services {PACKAGE}")
     up = "ServiceSinkhole" in services
-    log("  tunnel service: " + ("running" if up else "NOT detected (assert will reveal)"))
+    log("  tunnel service: " + ("running" if up else "NOT detected"))
+    if not up:
+        # self-diagnose: dump NetGuard's own log so a failure explains itself
+        lg = shell("logcat -d -t 600")
+        ng = [l for l in lg.splitlines()
+              if "netguard" in l.lower() or "vpn" in l.lower()]
+        log("  --- NetGuard/VPN logcat (why the tunnel didn't start) ---")
+        log("\n".join(ng[-25:]) if ng else "  (no NetGuard/VPN log lines found)")
+        log("  appops ACTIVATE_VPN: " + shell(f"appops get {PACKAGE} ACTIVATE_VPN").strip())
     return True
 
 
@@ -269,14 +314,61 @@ def main():
                     help="push=controlled list (deterministic); download=real StevenBlack default")
     ap.add_argument("--build", action="store_true", help="gradlew assembleDebug first")
     ap.add_argument("--install", action="store_true", help="adb install -r the debug APK")
-    ap.add_argument("--apk", default=DEBUG_APK)
+    ap.add_argument("--apk", default=None, help="explicit APK path; default = newest *-debug.apk")
     ap.add_argument("--setup-only", action="store_true",
                     help="build/install then STOP (so you can grant VPN consent) before verifying")
     ap.add_argument("--settle", type=int, default=18, help="seconds to let the tunnel settle after boot")
+    ap.add_argument("--diag", action="store_true", help="print device/run-as/root diagnostics and exit")
+    ap.add_argument("--blockdiag", action="store_true",
+                    help="tunnel already up: dump prefs + hosts + NetGuard hosts/filter log, then exit")
+    ap.add_argument("--canary", action="store_true",
+                    help="tunnel up: probe NetGuard canary + our domains + routing (no reboot)")
     args = ap.parse_args()
+
+    if args.canary:
+        adb("wait-for-device")
+        log("[canary] (tunnel assumed up from a prior run)")
+        for d in ("test.netguard.me", "doubleclick.net", "google-analytics.com", "wikipedia.org"):
+            log(f"  {d:24} -> {resolve_ip(d)}")
+        log("--- ip rule ---\n" + shell("ip rule").strip())
+        log("--- ip route (default) ---\n" +
+            "\n".join(l for l in shell("ip route").splitlines() if "default" in l or "tun" in l))
+        log("--- getprop net.dns1 ---\n" + shell("getprop net.dns1").strip())
+        return 0
 
     log(f"ADB: {ADB}")
     log(f"Package: {PACKAGE}   Mode: {args.mode}\n")
+
+    if args.diag:
+        adb("wait-for-device")
+        log("[diag]")
+        log("ro.build.type : " + shell("getprop ro.build.type").strip())
+        log("ro.debuggable  : " + shell("getprop ro.debuggable").strip())
+        log("adb root       : " + adb_out("root").strip())
+        time.sleep(2); adb("wait-for-device")
+        log("id (shell)     : " + shell("id").strip())
+        log("run-as id      : " + adb_out("shell", "run-as", PACKAGE, "id").strip())
+        log("pm path        : " + shell(f"pm path {PACKAGE}").strip())
+        log("ls data dir    :\n" + adb_out("shell", "run-as", PACKAGE, "ls", "-la", f"/data/data/{PACKAGE}").strip())
+        return 0
+
+    if args.blockdiag:
+        adb("wait-for-device")
+        enable_root()
+        log("[blockdiag]  (tunnel assumed up from a prior run)")
+        log("--- prefs on device ---")
+        log(dev_read(PREFS_FILE).strip())
+        log("--- hosts.txt on device ---")
+        log(shell(f"wc -l {HOSTS_DEVICE}").strip())
+        log(dev_read(HOSTS_DEVICE).strip()[:400])
+        log("--- ServiceSinkhole running? ---")
+        log("ServiceSinkhole" if "ServiceSinkhole" in shell(f"dumpsys activity services {PACKAGE}") else "no")
+        log("--- NetGuard logcat (hosts/filter/blocked) ---")
+        lg = shell("logcat -d -t 1500")
+        keep = [l for l in lg.splitlines()
+                if any(k in l.lower() for k in ("hosts", "sinkhole", "filtering", "blocked", "loaded", "allowed "))]
+        log("\n".join(keep[-35:]) if keep else "  (no matching log lines)")
+        return 0
 
     if args.build:
         log("[build] gradlew assembleDebug")
@@ -294,11 +386,15 @@ def main():
     wait_for_device()
 
     if args.install:
-        log(f"[install] {args.apk}")
-        r = adb("install", "-r", args.apk)
-        log("  " + r.stdout.decode("utf-8", "replace").strip())
+        apk = args.apk or find_debug_apk()
+        log(f"[install] {apk}")
+        r = adb("install", "-r", apk)
+        out = (r.stdout + b"\n" + r.stderr).decode("utf-8", "replace").strip()
+        log("  " + out)
         if b"Success" not in r.stdout:
-            log("! install failed"); return 2
+            log("! install failed (see adb output above)")
+            log(f"  if signature mismatch:  adb uninstall {PACKAGE}  then re-run")
+            return 2
 
     if args.setup_only:
         log("\n[setup-only] APK is on the device.")
@@ -307,9 +403,24 @@ def main():
         return 0
 
     log("[configure]")
+    rooted = enable_root()
+    log("  root: " + ("yes" if rooted else "NO — writes will fail on a production image"))
     adb("shell", "am", "force-stop", PACKAGE)
+    # Ensure the app's data dirs exist + are app-owned with the right SELinux label
+    # (done as root; the file writes below also chown/restorecon).
+    uid = app_uid()
+    for d in (f"/data/data/{PACKAGE}/shared_prefs", f"/data/data/{PACKAGE}/files"):
+        adb("shell", "mkdir", "-p", d)
+        adb("shell", "chown", f"{uid}:{uid}", d)
+        adb("shell", "restorecon", "-R", d)
+    # Pre-grant VPN consent headlessly so ReceiverAutostart can raise the tunnel
+    # silently after the reboot (no manual "Connection request" tap).
+    adb("shell", "appops", "set", PACKAGE, "ACTIVATE_VPN", "allow")
+    # NetGuard hosts-blocking only sees PLAINTEXT DNS — Android's Private DNS (DoT)
+    # encrypts queries and bypasses the sinkhole. Force it off for the test.
+    adb("shell", "settings", "put", "global", "private_dns_mode", "off")
     if not configure_prefs(args.mode == "download"):
-        log("! could not set prefs (is this a debuggable build? run-as needs it)"); return 2
+        log("! could not set prefs (need root or a debuggable build)"); return 2
 
     if args.mode == "push":
         if not push_controlled_hosts():
