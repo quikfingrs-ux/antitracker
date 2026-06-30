@@ -141,6 +141,18 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
     private int last_blocked = -1;
     private int last_hosts = -1;
 
+    // AntiTracker — Phase 4 engine: "trackers stopped" tally + "what broke?" retry detector.
+    // Written only from the LogHandler thread (log()); atBlockedToday/atIssue are volatile
+    // for cross-thread read by the status-bar notification.
+    private long atBlockDay = 0;                  // current tally day (epoch-day, UTC)
+    private volatile int atBlockedToday = 0;      // blocked connections counted today
+    private final Map<String, long[]> atRetry = new HashMap<>(); // "uid|host" -> {windowStartMs, count}
+    private static final long AT_WINDOW_MS = 15000;  // rolling retry window (15s)
+    private static final int AT_RETRY_TRIP = 4;      // same app+host blocked this often = likely breakage
+    private volatile boolean atIssue = false;     // an app currently looks broken by a block
+    private volatile int atBrokenUid = -1;        // which app
+    private volatile String atBrokenHost = null;  // which blocked host did it
+
     private static Object jni_lock = new Object();
     private static long jni_context = 0;
     private Thread tunnelThread = null;
@@ -822,6 +834,11 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
             // Get real name
             String dname = dh.getQName(packet.uid, packet.daddr);
 
+            // AntiTracker: count every block + watch for app-breaking retry bursts.
+            // Runs regardless of the user's logging prefs.
+            if (!packet.allowed)
+                atOnBlocked(packet, dname);
+
             // Traffic log
             if (log)
                 dh.insertLog(packet, dname, connection, interactive);
@@ -838,6 +855,42 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
                     lock.readLock().unlock();
                 }
             }
+        }
+
+        // AntiTracker — Phase 4 engine. Called for each BLOCKED connection.
+        private void atOnBlocked(Packet packet, String dname) {
+            // (1) Child-simple daily tally — "trackers stopped today". Resets each day (UTC).
+            long day = System.currentTimeMillis() / 86400000L;
+            if (day != atBlockDay) {
+                atBlockDay = day;
+                atBlockedToday = 0;
+            }
+            atBlockedToday++;
+
+            // (2) "What broke?" — only for real apps (skip unknown-uid noise).
+            if (packet.uid < 0)
+                return;
+            String host = (dname != null ? dname : packet.daddr);
+            String key = packet.uid + "|" + host;
+            long now = System.currentTimeMillis();
+            long[] w = atRetry.get(key); // {windowStartMs, count}
+            if (w == null || now - w[0] > AT_WINDOW_MS) {
+                atRetry.put(key, new long[]{now, 1});
+            } else {
+                w[1]++;
+                // A one-off tracker block is silent; an app hammering the SAME blocked
+                // host is usually one that's actually breaking. Flag it once.
+                if (w[1] >= AT_RETRY_TRIP && !atIssue) {
+                    atIssue = true;
+                    atBrokenUid = packet.uid;
+                    atBrokenHost = host;
+                    // Next change: flip the status icon red + raise the one-tap "Allow?" nudge.
+                }
+            }
+
+            // Keep the map bounded on busy devices.
+            if (atRetry.size() > 200)
+                atRetry.clear();
         }
 
         private void usage(Usage usage) {
