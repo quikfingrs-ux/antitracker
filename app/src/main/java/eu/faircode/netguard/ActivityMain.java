@@ -405,7 +405,16 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
                         @Override
                         public void onClick(DialogInterface dialog, int which) {
                             if (running) {
-                                prefs.edit().putBoolean("initialized", true).apply();
+                                // AntiTracker self-setup (Phase 3): on first agree,
+                                // auto-enable filtering + the blocklist, then flip the
+                                // main switch to kick NetGuard's proven VPN-enable flow.
+                                // Only remaining tap = Android's mandatory VPN consent.
+                                prefs.edit()
+                                        .putBoolean("initialized", true)
+                                        .putBoolean("filter", true)
+                                        .putBoolean("use_hosts", true)
+                                        .apply();
+                                swEnabled.setChecked(true);
                             }
                         }
                     })
