@@ -270,6 +270,8 @@ def main():
     ap.add_argument("--build", action="store_true", help="gradlew assembleDebug first")
     ap.add_argument("--install", action="store_true", help="adb install -r the debug APK")
     ap.add_argument("--apk", default=DEBUG_APK)
+    ap.add_argument("--setup-only", action="store_true",
+                    help="build/install then STOP (so you can grant VPN consent) before verifying")
     ap.add_argument("--settle", type=int, default=18, help="seconds to let the tunnel settle after boot")
     args = ap.parse_args()
 
@@ -297,6 +299,12 @@ def main():
         log("  " + r.stdout.decode("utf-8", "replace").strip())
         if b"Success" not in r.stdout:
             log("! install failed"); return 2
+
+    if args.setup_only:
+        log("\n[setup-only] APK is on the device.")
+        log("  Now: open Anti-Tracker, tap to enable it, accept the VPN")
+        log("  'Connection request' dialog ONCE. Then re-run WITHOUT --setup-only.")
+        return 0
 
     log("[configure]")
     adb("shell", "am", "force-stop", PACKAGE)

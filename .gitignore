@@ -18,3 +18,7 @@ app/.cxx/
 
 # Cefn operating charter — laptop-local (machine paths); never push to public repo
 /CLAUDE.md
+
+# Python tooling cruft
+tools/__pycache__/
+*.pyc
