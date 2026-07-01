@@ -2973,6 +2973,25 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
             return START_STICKY;
         }
 
+        // AntiTracker DEBUG-only: simulate a broken app to test the safety net end to end.
+        if (BuildConfig.DEBUG && intent != null && "uk.fab.antitracker.AT_TEST".equals(intent.getAction())) {
+            int uid = intent.getIntExtra("at_uid", -1);
+            String host = intent.getStringExtra("at_host");
+            if (host == null) host = "metrics.test-tracker.example";
+            atIssue = true;
+            atBrokenUid = uid;
+            atBrokenHost = host;
+            atBrokenVer = 4;
+            atBrokenProto = 6;
+            atBrokenDport = 443;
+            showBrokenNotification(uid, host, 4, 6, 443);
+            try {
+                updateEnforcingNotification(last_allowed, last_allowed + last_blocked);
+            } catch (Throwable ignored) {
+            }
+            return START_STICKY;
+        }
+
         // Keep awake
         getLock(this).acquire();
 
