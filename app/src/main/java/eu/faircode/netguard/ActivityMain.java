@@ -90,6 +90,8 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
     private TextView tvShutterStatus;
     private TextView tvShutterCount;
     private TextView tvShutterHint;
+    private View llBattery;
+    private Button btnBattery;
     private SwipeRefreshLayout swipeRefresh;
     private AdapterRule adapter = null;
     private MenuItem menuSearch = null;
@@ -181,6 +183,24 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
             }
         });
         updateShutterCard();
+
+        // AntiTracker — "Check battery use" opens the phone's OWN battery screen (the
+        // authoritative source). Only show the button if the device actually has that screen.
+        llBattery = findViewById(R.id.llBattery);
+        btnBattery = findViewById(R.id.btnBattery);
+        final Intent batteryIntent = new Intent(Intent.ACTION_POWER_USAGE_SUMMARY);
+        btnBattery.setVisibility(
+                batteryIntent.resolveActivity(getPackageManager()) != null ? View.VISIBLE : View.GONE);
+        btnBattery.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    startActivity(batteryIntent);
+                } catch (Throwable ex) {
+                    Toast.makeText(ActivityMain.this, R.string.msg_unavailable, Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
 
         // Icon
         ivIcon.setOnLongClickListener(new View.OnLongClickListener() {
@@ -538,11 +558,13 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
                     : getString(R.string.shutter_count_other, n));
             tvShutterCount.setVisibility(View.VISIBLE);
             tvShutterHint.setText(R.string.shutter_hint_off);
+            if (llBattery != null) llBattery.setVisibility(View.VISIBLE);
         } else {
             llShutterHome.setBackgroundColor(0xFF607D8B); // calm slate-grey = off (red reserved for alerts)
             tvShutterStatus.setText(R.string.shutter_status_off);
             tvShutterCount.setVisibility(View.GONE);
             tvShutterHint.setText(R.string.shutter_hint_on);
+            if (llBattery != null) llBattery.setVisibility(View.GONE);
         }
     }
 

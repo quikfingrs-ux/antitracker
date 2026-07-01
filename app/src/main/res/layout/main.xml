@@ -57,6 +57,34 @@
                 android:textSize="13sp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/llBattery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvBattery"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/shutter_battery_reassure"
+                android:textAppearance="@style/TextSmall" />
+
+            <Button
+                android:id="@+id/btnBattery"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/shutter_battery_button"
+                android:textAppearance="@style/TextSmall" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/tvDisabled"
             android:layout_width="match_parent"
