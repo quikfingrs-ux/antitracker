@@ -105,6 +105,7 @@ import java.util.Date;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -889,6 +890,14 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
                 if (!atDecidedLoaded) { atLoadDecided(); atDecidedLoaded = true; }
                 String host = (dname != null ? dname : packet.daddr);
                 String key = packet.uid + "|" + host;
+                // Bounded hygiene: only entries inside the live 15s window matter.
+                // When the map grows, drop stale ones so a long session can't leak.
+                if (atRetry.size() > 256) {
+                    Iterator<long[]> it = atRetry.values().iterator();
+                    while (it.hasNext())
+                        if (now - it.next()[0] > AT_WINDOW_MS)
+                            it.remove();
+                }
                 long[] w = atRetry.get(key); // {windowStartMs, count}
                 if (w == null || now - w[0] > AT_WINDOW_MS) {
                     atRetry.put(key, new long[]{now, 1});

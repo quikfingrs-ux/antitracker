@@ -365,6 +365,21 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
         swipeRefresh = findViewById(R.id.swipeRefresh);
         swipeRefresh.setColorSchemeColors(Color.WHITE, Color.WHITE, Color.WHITE);
         swipeRefresh.setProgressBackgroundColorSchemeColor(tv.data);
+
+        // AntiTracker — simple home: the per-app list is hidden by default and
+        // revealed on demand via "Advanced". The list still loads in the background,
+        // so toggling it is instant; this is purely a visibility change.
+        swipeRefresh.setVisibility(View.GONE);
+        final View llAdvanced = findViewById(R.id.llAdvanced);
+        final TextView tvAdvanced = findViewById(R.id.tvAdvanced);
+        llAdvanced.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean show = swipeRefresh.getVisibility() != View.VISIBLE;
+                swipeRefresh.setVisibility(show ? View.VISIBLE : View.GONE);
+                tvAdvanced.setText(show ? R.string.shutter_advanced_hide : R.string.shutter_advanced_show);
+            }
+        });
         swipeRefresh.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
             @Override
             public void onRefresh() {
