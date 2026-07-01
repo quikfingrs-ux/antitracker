@@ -152,6 +152,7 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
     private volatile boolean atIssue = false;     // an app currently looks broken by a block
     private volatile int atBrokenUid = -1;        // which app
     private volatile String atBrokenHost = null;  // which blocked host did it
+    private long atLastNotify = 0;                 // last enforcing-notification refresh (throttle)
 
     private static Object jni_lock = new Object();
     private static long jni_context = 0;
@@ -860,7 +861,8 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
         // AntiTracker — Phase 4 engine. Called for each BLOCKED connection.
         private void atOnBlocked(Packet packet, String dname) {
             // (1) Child-simple daily tally — "trackers stopped today". Resets each day (UTC).
-            long day = System.currentTimeMillis() / 86400000L;
+            long now = System.currentTimeMillis();
+            long day = now / 86400000L;
             if (day != atBlockDay) {
                 atBlockDay = day;
                 atBlockedToday = 0;
@@ -868,29 +870,38 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
             atBlockedToday++;
 
             // (2) "What broke?" — only for real apps (skip unknown-uid noise).
-            if (packet.uid < 0)
-                return;
-            String host = (dname != null ? dname : packet.daddr);
-            String key = packet.uid + "|" + host;
-            long now = System.currentTimeMillis();
-            long[] w = atRetry.get(key); // {windowStartMs, count}
-            if (w == null || now - w[0] > AT_WINDOW_MS) {
-                atRetry.put(key, new long[]{now, 1});
-            } else {
-                w[1]++;
-                // A one-off tracker block is silent; an app hammering the SAME blocked
-                // host is usually one that's actually breaking. Flag it once.
-                if (w[1] >= AT_RETRY_TRIP && !atIssue) {
-                    atIssue = true;
-                    atBrokenUid = packet.uid;
-                    atBrokenHost = host;
-                    // Next change: flip the status icon red + raise the one-tap "Allow?" nudge.
+            boolean tripped = false;
+            if (packet.uid >= 0) {
+                String host = (dname != null ? dname : packet.daddr);
+                String key = packet.uid + "|" + host;
+                long[] w = atRetry.get(key); // {windowStartMs, count}
+                if (w == null || now - w[0] > AT_WINDOW_MS) {
+                    atRetry.put(key, new long[]{now, 1});
+                } else {
+                    w[1]++;
+                    // A one-off tracker block is silent; an app hammering the SAME blocked
+                    // host is usually one that's actually breaking. Flag it once.
+                    if (w[1] >= AT_RETRY_TRIP && !atIssue) {
+                        atIssue = true;
+                        atBrokenUid = packet.uid;
+                        atBrokenHost = host;
+                        tripped = true;
+                    }
                 }
+                // Keep the map bounded on busy devices.
+                if (atRetry.size() > 200)
+                    atRetry.clear();
             }
 
-            // Keep the map bounded on busy devices.
-            if (atRetry.size() > 200)
-                atRetry.clear();
+            // (3) Refresh the status notification: the live-ish count (throttled ~5s),
+            // and immediately the moment an app first looks broken (red state).
+            if (tripped || now - atLastNotify > 5000) {
+                atLastNotify = now;
+                try {
+                    updateEnforcingNotification(last_allowed, last_allowed + last_blocked);
+                } catch (Throwable ignored) {
+                }
+            }
         }
 
         private void usage(Usage usage) {
@@ -3110,6 +3121,14 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
                     .setVisibility(NotificationCompat.VISIBILITY_SECRET)
                     .setPriority(NotificationCompat.PRIORITY_MIN);
 
+        // AntiTracker Phase 4B: red alert appearance when a block looks like it's breaking an app.
+        boolean atAlert = atIssue;
+        if (atAlert) {
+            builder.setColor(0xFFD32F2F); // red, overrides the calm primary colour set above
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+                builder.setContentTitle(getString(R.string.app_name) + " - an app may not be working");
+        }
+
         if (allowed >= 0)
             last_allowed = allowed;
         else
@@ -3123,24 +3142,25 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
         else
             hosts = last_hosts;
 
-        if (allowed >= 0 || blocked >= 0 || hosts >= 0) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                if (Util.isPlayStoreInstall(this))
-                    builder.setContentText(getString(R.string.msg_packages, allowed, blocked));
-                else
-                    builder.setContentText(getString(R.string.msg_hosts, allowed, blocked, hosts));
-                return builder.build();
-            } else {
-                NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
-                notification.bigText(getString(R.string.msg_started));
-                if (Util.isPlayStoreInstall(this))
-                    notification.setSummaryText(getString(R.string.msg_packages, allowed, blocked));
-                else
-                    notification.setSummaryText(getString(R.string.msg_hosts, allowed, blocked, hosts));
-                return notification.build();
-            }
-        } else
+        // AntiTracker Phase 4B: show the plain-English "trackers stopped today" count
+        // (or, in the alert state, a short hint) instead of the engineer-speak allowed/blocked line.
+        String atText;
+        if (atAlert)
+            atText = "An app may not be working - tap to check";
+        else if (atBlockedToday == 1)
+            atText = "1 tracker stopped today";
+        else
+            atText = atBlockedToday + " trackers stopped today";
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            builder.setContentText(atText);
             return builder.build();
+        } else {
+            NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+            notification.bigText(getString(R.string.msg_started));
+            notification.setSummaryText(atText);
+            return notification.build();
+        }
     }
 
     private void updateEnforcingNotification(int allowed, int total) {
