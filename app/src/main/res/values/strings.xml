@@ -15,7 +15,7 @@
     <string name="shutter_battery_button">Check battery use</string>
     <string name="shutter_advanced_show">Advanced — per-app controls</string>
     <string name="shutter_advanced_hide">Hide per-app controls</string>
-    <string name="app_description">NetGuard provides simple and advanced ways to block access to the internet - no root required. Apps and addresses can individually be allowed or denied access to your Wi-Fi and/or mobile connection.</string>
+    <string name="app_description">The apps on your phone are talking to trackers behind your back. Shutter cuts them off — quietly, on your device, with nothing sent to any server. And when blocking trips an app up, Shutter\'s the only one that tells you which one, and fixes it in a tap.</string>
     <string name="app_copyright" translatable="false">Copyright \u00A9 2015–2026 by M. Bokhorst (M66B)</string>
     <string name="app_android">Shutter requires Android 5.1 or later</string>
     <string name="app_xposed">Xposed causes too many crashes, which might result in Shutter being removed from the Google Play Store, therefore Shutter isn\'t supported while Xposed is installed</string>
