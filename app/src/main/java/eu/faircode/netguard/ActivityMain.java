@@ -408,7 +408,7 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
         tvFairEmail.setMovementMethod(LinkMovementMethod.getInstance());
         Button btnFairEmail = findViewById(R.id.btnFairEmail);
         boolean hintFairEmail = prefs.getBoolean("hint_fairemail", true);
-        llFairEmail.setVisibility(hintFairEmail ? View.VISIBLE : View.GONE);
+        llFairEmail.setVisibility(View.GONE); // Shutter: don't promote another app
         btnFairEmail.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
