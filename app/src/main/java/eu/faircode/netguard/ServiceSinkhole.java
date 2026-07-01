@@ -153,6 +153,11 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
     private volatile int atBrokenUid = -1;        // which app
     private volatile String atBrokenHost = null;  // which blocked host did it
     private long atLastNotify = 0;                 // last enforcing-notification refresh (throttle)
+    private volatile int atBrokenVer = 4;          // captured connection key of the broken flow
+    private volatile int atBrokenProto = 6;        // (for the one-tap allow to match exactly)
+    private volatile int atBrokenDport = 443;
+    private final java.util.Set<String> atDecided = new java.util.HashSet<>(); // "uid|host" already answered
+    private boolean atDecidedLoaded = false;       // lazy-load of persisted decisions done?
 
     private static Object jni_lock = new Object();
     private static long jni_context = 0;
@@ -216,6 +221,8 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
     private static final String ACTION_HOUSE_HOLDING = "eu.faircode.netguard.HOUSE_HOLDING";
     private static final String ACTION_SCREEN_OFF_DELAYED = "eu.faircode.netguard.SCREEN_OFF_DELAYED";
     private static final String ACTION_WATCHDOG = "eu.faircode.netguard.WATCHDOG";
+    private static final String ACTION_AT_ALLOW = "uk.fab.antitracker.AT_ALLOW";
+    private static final String ACTION_AT_KEEP = "uk.fab.antitracker.AT_KEEP";
 
     private native long jni_init(int sdk);
 
@@ -872,6 +879,7 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
             // (2) "What broke?" — only for real apps (skip unknown-uid noise).
             boolean tripped = false;
             if (packet.uid >= 0) {
+                if (!atDecidedLoaded) { atLoadDecided(); atDecidedLoaded = true; }
                 String host = (dname != null ? dname : packet.daddr);
                 String key = packet.uid + "|" + host;
                 long[] w = atRetry.get(key); // {windowStartMs, count}
@@ -881,11 +889,16 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
                     w[1]++;
                     // A one-off tracker block is silent; an app hammering the SAME blocked
                     // host is usually one that's actually breaking. Flag it once.
-                    if (w[1] >= AT_RETRY_TRIP && !atIssue) {
+                    if (w[1] >= AT_RETRY_TRIP && !atIssue && !atDecided.contains(key)) {
                         atIssue = true;
                         atBrokenUid = packet.uid;
                         atBrokenHost = host;
+                        atBrokenVer = packet.version;
+                        atBrokenProto = packet.protocol;
+                        atBrokenDport = packet.dport;
                         tripped = true;
+                        showBrokenNotification(packet.uid, host,
+                                packet.version, packet.protocol, packet.dport);
                     }
                 }
                 // Keep the map bounded on busy devices.
@@ -2929,6 +2942,37 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
             return START_STICKY;
         }
 
+        // AntiTracker Phase 4C: "what broke?" nudge button actions.
+        if (intent != null && ACTION_AT_ALLOW.equals(intent.getAction())) {
+            int uid = intent.getIntExtra("at_uid", -1);
+            String host = intent.getStringExtra("at_host");
+            if (host != null) {
+                Packet pkt = new Packet();
+                pkt.uid = uid;
+                pkt.version = intent.getIntExtra("at_ver", 4);
+                pkt.protocol = intent.getIntExtra("at_proto", 6);
+                pkt.daddr = host;
+                pkt.dport = intent.getIntExtra("at_dport", 443);
+                pkt.time = System.currentTimeMillis();
+                pkt.allowed = true;
+                DatabaseHelper.getInstance(this).updateAccess(pkt, host, 0); // 0 = allow (overrides the block)
+                atDecide(uid, host);
+                NotificationManagerCompat.from(this).cancel(uid + 20000);
+                reload("shutter allow", this, false);
+            }
+            return START_STICKY;
+        }
+        if (intent != null && ACTION_AT_KEEP.equals(intent.getAction())) {
+            int uid = intent.getIntExtra("at_uid", -1);
+            String host = intent.getStringExtra("at_host");
+            if (host != null) {
+                atDecide(uid, host);
+                NotificationManagerCompat.from(this).cancel(uid + 20000);
+                reload("shutter keep", this, false);
+            }
+            return START_STICKY;
+        }
+
         // Keep awake
         getLock(this).acquire();
 
@@ -3396,6 +3440,79 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
 
         if (Util.canNotify(this))
             NotificationManagerCompat.from(this).notify(uid + 10000, notification.build());
+    }
+
+    // AntiTracker Phase 4C: the "what broke?" nudge + its one-tap Allow / Keep-blocking.
+    private void showBrokenNotification(int uid, String host, int ver, int proto, int dport) {
+        List<String> apps = Util.getApplicationNames(uid, this);
+        String name = (apps == null || apps.size() == 0) ? ("App uid " + uid) : TextUtils.join(", ", apps);
+
+        // Tapping the body opens the app's access screen (manual fallback).
+        Intent main = new Intent(this, ActivityMain.class);
+        main.putExtra(ActivityMain.EXTRA_SEARCH, Integer.toString(uid));
+        PendingIntent piMain = PendingIntentCompat.getActivity(this, uid + 20000, main, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        // "It's broken - let it through": allow this exact app+host flow.
+        Intent iAllow = new Intent(this, ServiceSinkhole.class);
+        iAllow.setAction(ACTION_AT_ALLOW);
+        iAllow.putExtra("at_uid", uid);
+        iAllow.putExtra("at_host", host);
+        iAllow.putExtra("at_ver", ver);
+        iAllow.putExtra("at_proto", proto);
+        iAllow.putExtra("at_dport", dport);
+        PendingIntent piAllow = PendingIntentCompat.getService(this, uid + 21000, iAllow, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        // "Seems fine - keep blocking": remember the choice, never nag about this pair again.
+        Intent iKeep = new Intent(this, ServiceSinkhole.class);
+        iKeep.setAction(ACTION_AT_KEEP);
+        iKeep.putExtra("at_uid", uid);
+        iKeep.putExtra("at_host", host);
+        PendingIntent piKeep = PendingIntentCompat.getService(this, uid + 22000, iKeep, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        String big = "It keeps trying to reach " + host + ".\n"
+                + "If " + name + " is playing up, this might be why.\n\n"
+                + "Is " + name + " working okay?";
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, "access");
+        b.setSmallIcon(R.drawable.ic_cloud_upload_white_24dp)
+                .setColor(0xFFD32F2F)
+                .setContentTitle(name + " may not be working")
+                .setContentText("It keeps trying to reach " + host + ".")
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(big))
+                .setContentIntent(piMain)
+                .setAutoCancel(true)
+                .setOngoing(false)
+                .addAction(R.drawable.ic_cloud_upload_white_24dp, "It's broken - let it through", piAllow)
+                .addAction(R.drawable.ic_cloud_upload_white_24dp, "Seems fine - keep blocking", piKeep);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+            b.setCategory(NotificationCompat.CATEGORY_STATUS);
+
+        if (Util.canNotify(this))
+            NotificationManagerCompat.from(this).notify(uid + 20000, b.build());
+    }
+
+    // Remember the user's answer for an app+host pair (survives restarts) and clear the alert.
+    private void atDecide(int uid, String host) {
+        String key = uid + "|" + host;
+        atDecided.add(key);
+        try {
+            getSharedPreferences("shutter_decided", MODE_PRIVATE).edit().putBoolean(key, true).apply();
+        } catch (Throwable ignored) {
+        }
+        if (uid == atBrokenUid && host.equals(atBrokenHost)) {
+            atIssue = false;
+            atBrokenUid = -1;
+            atBrokenHost = null;
+        }
+    }
+
+    // Load the persisted "already answered" pairs once, so we never re-nag after a restart.
+    private void atLoadDecided() {
+        try {
+            for (String k : getSharedPreferences("shutter_decided", MODE_PRIVATE).getAll().keySet())
+                atDecided.add(k);
+        } catch (Throwable ignored) {
+        }
     }
 
     private void showUpdateNotification(String name, String url) {
