@@ -767,6 +767,17 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    public Cursor getAllowed() {
+        lock.readLock().lock();
+        try {
+            SQLiteDatabase db = this.getReadableDatabase();
+            // block: 0 = allowed (let through), 1 = blocked, -1 = unset. Indexed on block.
+            return db.rawQuery("SELECT ID AS _id, uid, daddr FROM access WHERE block = 0 ORDER BY uid, daddr", null);
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
     public Cursor getAccessUnset(int uid, int limit, long since) {
         lock.readLock().lock();
         try {

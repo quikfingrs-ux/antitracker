@@ -145,6 +145,16 @@
         </activity>
 
         <activity
+            android:name=".ActivityAllowed"
+            android:configChanges="orientation|screenSize"
+            android:label="@string/title_allowed"
+            android:parentActivityName=".ActivityMain">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value=".ActivityMain" />
+        </activity>
+
+        <activity
             android:name=".ActivityForwarding"
             android:configChanges="orientation|screenSize"
             android:label="@string/setting_forwarding"

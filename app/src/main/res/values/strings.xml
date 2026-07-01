@@ -1,5 +1,10 @@
 <resources>
     <string name="app_name" translatable="false">Shutter</string>
+    <string name="title_allowed">Apps you\'ve allowed</string>
+    <string name="menu_allowed">Apps you\'ve allowed</string>
+    <string name="msg_allowed_intro">You\'ve let these apps reach hosts Shutter normally blocks. Undo any time to start blocking again.</string>
+    <string name="msg_allowed_empty">You haven\'t allowed anything yet. When an app breaks, let it through and it\'ll show up here.</string>
+    <string name="action_undo">Undo</string>
     <string name="app_description">NetGuard provides simple and advanced ways to block access to the internet - no root required. Apps and addresses can individually be allowed or denied access to your Wi-Fi and/or mobile connection.</string>
     <string name="app_copyright" translatable="false">Copyright \u00A9 2015–2026 by M. Bokhorst (M66B)</string>
     <string name="app_android">NetGuard requires Android 5.1 or later</string>

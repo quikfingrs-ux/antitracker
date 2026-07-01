@@ -59,6 +59,9 @@
         android:id="@+id/menu_log"
         android:title="@string/menu_log"/>
     <item
+        android:id="@+id/menu_allowed"
+        android:title="@string/menu_allowed"/>
+    <item
         android:id="@+id/menu_settings"
         android:title="@string/menu_settings"/>
     <item

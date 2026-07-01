@@ -951,6 +951,10 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
                     Toast.makeText(this, R.string.msg_unavailable, Toast.LENGTH_SHORT).show();
                 return true;
 
+            case R.id.menu_allowed:
+                startActivity(new Intent(this, ActivityAllowed.class));
+                return true;
+
             case R.id.menu_settings:
                 startActivity(new Intent(this, ActivitySettings.class));
                 return true;
