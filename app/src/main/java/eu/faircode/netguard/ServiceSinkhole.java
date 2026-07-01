@@ -146,6 +146,12 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
     // for cross-thread read by the status-bar notification.
     private long atBlockDay = 0;                  // current tally day (epoch-day, UTC)
     private volatile int atBlockedToday = 0;      // blocked connections counted today
+    private static volatile int atBlockedTodayShared = 0; // UI-readable mirror (home card)
+
+    // AntiTracker — let the home screen read today's tally without binding the service.
+    public static int getBlockedToday() {
+        return atBlockedTodayShared;
+    }
     private final Map<String, long[]> atRetry = new HashMap<>(); // "uid|host" -> {windowStartMs, count}
     private static final long AT_WINDOW_MS = 15000;  // rolling retry window (15s)
     private static final int AT_RETRY_TRIP = 4;      // same app+host blocked this often = likely breakage
@@ -875,6 +881,7 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
                 atBlockedToday = 0;
             }
             atBlockedToday++;
+            atBlockedTodayShared = atBlockedToday;
 
             // (2) "What broke?" — only for real apps (skip unknown-uid noise).
             boolean tripped = false;

@@ -86,6 +86,10 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
     private ImageView ivQueue;
     private SwitchCompat swEnabled;
     private ImageView ivMetered;
+    private LinearLayout llShutterHome;
+    private TextView tvShutterStatus;
+    private TextView tvShutterCount;
+    private TextView tvShutterHint;
     private SwipeRefreshLayout swipeRefresh;
     private AdapterRule adapter = null;
     private MenuItem menuSearch = null;
@@ -163,6 +167,20 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
         ivQueue = actionView.findViewById(R.id.ivQueue);
         swEnabled = actionView.findViewById(R.id.swEnabled);
         ivMetered = actionView.findViewById(R.id.ivMetered);
+
+        // AntiTracker — Shutter home status card. Proxies the on/off switch, so all
+        // the VpnService-consent wiring stays in swEnabled's listener (unchanged).
+        llShutterHome = findViewById(R.id.llShutterHome);
+        tvShutterStatus = findViewById(R.id.tvShutterStatus);
+        tvShutterCount = findViewById(R.id.tvShutterCount);
+        tvShutterHint = findViewById(R.id.tvShutterHint);
+        llShutterHome.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                swEnabled.toggle();
+            }
+        });
+        updateShutterCard();
 
         // Icon
         ivIcon.setOnLongClickListener(new View.OnLongClickListener() {
@@ -507,9 +525,31 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
         }
     }
 
+    private void updateShutterCard() {
+        if (llShutterHome == null)
+            return;
+        boolean on = PreferenceManager.getDefaultSharedPreferences(this).getBoolean("enabled", false);
+        if (on) {
+            llShutterHome.setBackgroundColor(ContextCompat.getColor(this, R.color.colorTealPrimary));
+            tvShutterStatus.setText(R.string.shutter_status_on);
+            int n = ServiceSinkhole.getBlockedToday();
+            tvShutterCount.setText(n == 1
+                    ? getString(R.string.shutter_count_one)
+                    : getString(R.string.shutter_count_other, n));
+            tvShutterCount.setVisibility(View.VISIBLE);
+            tvShutterHint.setText(R.string.shutter_hint_off);
+        } else {
+            llShutterHome.setBackgroundColor(0xFF607D8B); // calm slate-grey = off (red reserved for alerts)
+            tvShutterStatus.setText(R.string.shutter_status_off);
+            tvShutterCount.setVisibility(View.GONE);
+            tvShutterHint.setText(R.string.shutter_hint_on);
+        }
+    }
+
     @Override
     protected void onResume() {
         Log.i(TAG, "Resume");
+        updateShutterCard();
 
         if (Build.VERSION.SDK_INT < MIN_SDK || Util.hasXposed(this)) {
             super.onResume();
@@ -687,6 +727,9 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
             SwitchCompat swEnabled = getSupportActionBar().getCustomView().findViewById(R.id.swEnabled);
             if (swEnabled.isChecked() != enabled)
                 swEnabled.setChecked(enabled);
+
+            // AntiTracker — reflect the new state on the home card
+            updateShutterCard();
 
         } else if ("whitelist_wifi".equals(name) ||
                 "screen_on".equals(name) ||
