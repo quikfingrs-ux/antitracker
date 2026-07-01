@@ -2622,6 +2622,51 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
         }
     }
 
+    // AntiTracker DEBUG-only: broadcast trigger so the safety net can be exercised from adb
+    // (adb cannot start a VpnService directly, but it can send a broadcast).
+    private BroadcastReceiver atTestReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!BuildConfig.DEBUG)
+                return;
+            String step = intent.getStringExtra("step");
+            int uid = intent.getIntExtra("at_uid", -1);
+            String host = intent.getStringExtra("at_host");
+            if (host == null)
+                host = "metrics.test-tracker.example";
+            if ("allow".equals(step)) {
+                Packet pkt = new Packet();
+                pkt.uid = uid;
+                pkt.version = 4;
+                pkt.protocol = 6;
+                pkt.daddr = host;
+                pkt.dport = 443;
+                pkt.time = System.currentTimeMillis();
+                pkt.allowed = true;
+                DatabaseHelper.getInstance(ServiceSinkhole.this).updateAccess(pkt, host, 0);
+                atDecide(uid, host);
+                NotificationManagerCompat.from(ServiceSinkhole.this).cancel(uid + 20000);
+                reload("shutter allow", ServiceSinkhole.this, false);
+            } else if ("keep".equals(step)) {
+                atDecide(uid, host);
+                NotificationManagerCompat.from(ServiceSinkhole.this).cancel(uid + 20000);
+                reload("shutter keep", ServiceSinkhole.this, false);
+            } else {
+                atIssue = true;
+                atBrokenUid = uid;
+                atBrokenHost = host;
+                atBrokenVer = 4;
+                atBrokenProto = 6;
+                atBrokenDport = 443;
+                showBrokenNotification(uid, host, 4, 6, 443);
+                try {
+                    updateEnforcingNotification(last_allowed, last_allowed + last_blocked);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    };
+
     @Override
     public void onCreate() {
         Log.i(TAG, "Create version=" + Util.getSelfVersionName(this) + "/" + Util.getSelfVersionCode(this));
@@ -2693,6 +2738,11 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
         ifPackage.addDataScheme("package");
         ContextCompat.registerReceiver(this, packageChangedReceiver, ifPackage, ContextCompat.RECEIVER_NOT_EXPORTED);
         registeredPackageChanged = true;
+
+        if (BuildConfig.DEBUG) {
+            IntentFilter ifAtTest = new IntentFilter("uk.fab.antitracker.AT_TEST");
+            ContextCompat.registerReceiver(this, atTestReceiver, ifAtTest, ContextCompat.RECEIVER_EXPORTED);
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             try {
@@ -3111,6 +3161,12 @@ public class ServiceSinkhole extends VpnService implements SharedPreferences.OnS
                 unregisterReceiver(packageChangedReceiver);
                 registeredPackageChanged = false;
             }
+
+            if (BuildConfig.DEBUG)
+                try {
+                    unregisterReceiver(atTestReceiver);
+                } catch (Throwable ignored) {
+                }
 
             if (networkCallback != null) {
                 unlistenNetworkChanges();
