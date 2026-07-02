@@ -56,6 +56,11 @@ public class ApplicationEx extends Application {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             createNotificationChannels();
 
+        // Shutter: make sure a blocklist exists before the engine ever reads it — seed
+        // the bundled HaGeZi Light list into hosts.txt on first run / after a data clear.
+        // Idempotent: a no-op once hosts.txt is present.
+        Blocklists.ensureSeeded(this);
+
         mPrevHandler = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override

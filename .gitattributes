@@ -1,0 +1,3 @@
+# Shutter: bundled blocklist is data, not source — never convert line endings, so the
+# file stays byte-identical across the laptop and PC clones and out of EOL diff noise.
+app/src/main/assets/blocklist_light.txt -text
