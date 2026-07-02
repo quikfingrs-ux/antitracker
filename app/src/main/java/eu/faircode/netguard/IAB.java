@@ -176,41 +176,17 @@ public class IAB implements ServiceConnection {
     }
 
     public static boolean isPurchased(String sku, Context context) {
-        try {
-            if (Util.isDebuggable(context)) {
-                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
-                return !prefs.getBoolean("debug_iab", false);
-            }
-
-            SharedPreferences prefs = context.getSharedPreferences("IAB", Context.MODE_PRIVATE);
-            if (ActivityPro.SKU_SUPPORT1.equals(sku) || ActivityPro.SKU_SUPPORT2.equals(sku))
-                return prefs.getBoolean(sku, false);
-
-            return (prefs.getBoolean(sku, false) ||
-                    prefs.getBoolean(ActivityPro.SKU_PRO1, false) ||
-                    prefs.getBoolean(ActivityPro.SKU_SUPPORT1, false) ||
-                    prefs.getBoolean(ActivityPro.SKU_SUPPORT2, false) ||
-                    prefs.getBoolean(ActivityPro.SKU_DONATION, false));
-        } catch (SecurityException ignored) {
-            return false;
-        }
+        // Shutter: NetGuard's Google Play in-app-purchase paywall stripped out.
+        // Every former "Pro" feature (log, per-app filter, notify, speed, themes) is
+        // now free. The upstream SKUs belonged to NetGuard's merchant account and could
+        // never resolve a purchase for us anyway. Any future Shutter Pro will use our own
+        // billing, not this. ActivityPro/IAB remain as dead code pending a Phase-6 delete.
+        return true;
     }
 
     public static boolean isPurchasedAny(Context context) {
-        try {
-            if (Util.isDebuggable(context)) {
-                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
-                return !(prefs.getBoolean("debug_iab", false));
-            }
-
-            SharedPreferences prefs = context.getSharedPreferences("IAB", Context.MODE_PRIVATE);
-            for (String key : prefs.getAll().keySet())
-                if (prefs.getBoolean(key, false))
-                    return true;
-            return false;
-        } catch (SecurityException ignored) {
-            return false;
-        }
+        // Shutter: paywall stripped — treat everything as owned (all features free).
+        return true;
     }
 
     public static String getResult(int responseCode) {
